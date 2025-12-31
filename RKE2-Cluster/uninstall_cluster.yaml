@@ -1,8 +1,0 @@
----
-- hosts: k8s_cluster
-  gather_facts: false
-  tasks:
-  - name: Uninstall rke2
-    shell: rke2-uninstall.sh
-    become: true
-    become_method: sudo

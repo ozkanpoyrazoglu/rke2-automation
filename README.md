@@ -87,6 +87,16 @@ Sync Nodes butonuna bas veya status refresh yap.
 **SSH bağlantı hatası:**
 Credentials sayfasından SSH bilgilerini kontrol et. Firewall'lara bak (port 22).
 
+## Güvenlik
+
+**Secrets Scanning:**
+Push etmeden önce credential taraması yap:
+```bash
+./scripts/scan-secrets.sh
+```
+
+GitHub'a her push'ta otomatik olarak Gitleaks Action çalışıyor.
+
 ## Daha Fazla
 
 - [Cluster Lock & Guardrails](./CLUSTER_LOCK_AND_GUARDRAILS.md)
