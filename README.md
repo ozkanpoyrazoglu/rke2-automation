@@ -1,194 +1,93 @@
-# RKE2 Automation Tool
+# RKE2 Automation
 
-Internal tool for managing RKE2/Kubernetes clusters on on-premise infrastructure.
+On-premise RKE2 cluster yönetimi için internal tool.
 
-## Features
+## Neler Var
 
-### Cluster Management
-- 🚀 **Create & Install** - Bootstrap new RKE2 clusters with Ansible automation
-- 📊 **Monitor Status** - Real-time cluster health, node status, and component monitoring
-- 🔧 **Scale Clusters** - Add/remove nodes with safety guardrails
-- 📋 **Register Existing** - Import and manage existing RKE2 clusters
+- Yeni cluster oluşturma ve Ansible ile otomatik kurulum
+- Mevcut cluster'ları register edip yönetme
+- Node ekleme/çıkarma (guardrail'ler ile korumalı)
+- Cluster status monitoring ve node sağlık durumu takibi
+- Job logları ile canlı Ansible playbook çıktıları
+- LLM destekli job özeti ve analiz (AWS Bedrock)
 
-### Safety & Reliability
-- 🔒 **Cluster Locking** - Prevents concurrent operations (409 Conflict responses)
-- ✅ **Guardrails** - Prevents unsafe operations:
-  - G1: Bootstrap prerequisite checks
-  - G2: Safe master removal (quorum protection)
-  - G3: Sequential master/worker additions
-  - G4: Node identity validation (no duplicates)
-- 🔄 **Node Status Sync** - Auto-sync database with actual cluster state
+### Güvenlik ve Guardrail'ler
 
-### User Experience
-- 🎨 **Modern UI** - Custom modal dialogs instead of browser alerts
-- 📝 **Detailed Error Messages** - Clear, actionable error feedback
-- 🔐 **Secure Credentials** - Encrypted SSH credential storage
-- 📡 **Live Job Streaming** - Real-time Ansible playbook output
+Sistem unsafe operasyonları engelliyor:
 
-### Advanced Features
-- 🤖 **LLM-powered Summaries** - AWS Bedrock (Claude) for job analysis
-- 📈 **Upgrade Readiness** - Analyze cluster upgrade compatibility
-- 📦 **Cluster Templates** - Role-based RKE2 config generation
+- **Cluster Lock:** Aynı anda tek operasyon (409 conflict dönüyor)
+- **G1:** Initial master ACTIVE olmadan node eklenemez
+- **G2:** Son master silinemiyor, quorum korunuyor
+- **G3:** Master ve worker eklemeleri sıralı yapılıyor
+- **G4:** Duplicate hostname/IP kontrolü
 
-## Quick Start
+## Hızlı Başlangıç
 
-### Prerequisites
-- Docker & Docker Compose
-- SSH access to target nodes
-- (Optional) AWS credentials for LLM features
-
-### Setup
-
-1. **Clone and configure:**
 ```bash
-git clone <repository-url>
-cd rke2-automation
+# .env dosyasını hazırla
 cp .env.example .env
-# Edit .env with your AWS credentials and encryption key
-```
+# AWS credentials ve encryption key'i .env'e ekle
 
-2. **Start services:**
-```bash
+# Servisleri başlat
 docker-compose up -d
 ```
 
-3. **Access UI:**
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+Frontend: http://localhost:3000
+Backend: http://localhost:8000
 
-### Configuration
+## Stack
 
-Generate encryption key for credentials:
+- Frontend: React + Vite
+- Backend: FastAPI + SQLAlchemy
+- Database: SQLite (./data/rke2.db)
+- Automation: Ansible + ansible-runner
+- LLM: AWS Bedrock (Claude)
+
+## Önemli Notlar
+
+**Credential Encryption:**
 ```bash
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Add to `.env`:
-```env
-ENCRYPTION_KEY=your-generated-key-here
-```
+**Cluster Data:**
+- Database: `data/rke2.db` (gitignore'da)
+- Ansible artifacts: `ansible/clusters/<cluster-name>/` (gitignore'da)
+- SSH credentials encrypted olarak database'de
 
-## Architecture
+**Node Status Sync:**
+Database'deki node statusları bazen Kubernetes'teki gerçek durumla sync olmayabiliyor. Cluster detail sayfasında "Sync Nodes" butonu ile manuel sync yapabilirsin. Status refresh ederken otomatik sync de çalışıyor.
 
-### Stack
-- **Frontend:** React + Vite (port 3000)
-- **Backend:** FastAPI + SQLAlchemy (port 8000)
-- **Database:** SQLite (persistent volume)
-- **Automation:** Ansible + ansible-runner
-- **AI/LLM:** AWS Bedrock (Claude Sonnet)
+## Kullanım
 
-### Data Storage
-- Database: `./data/rke2.db` (SQLite)
-- Ansible artifacts: `./ansible/clusters/<cluster-name>/`
-- Credentials: Encrypted in database
+**Cluster Oluşturma:**
+1. New Cluster formunu doldur (name, RKE2 version, CNI)
+2. Initial master node bilgilerini gir
+3. SSH credential ekle
+4. Create Cluster (Ansible artifact'leri oluşturur)
+5. Install butonuna bas
 
-### Security
-- SSH credentials encrypted with Fernet
-- Kubeconfigs stored in database
-- Sensitive files excluded via `.gitignore`
-- No hardcoded credentials
+**Node Ekleme/Çıkarma:**
+- Cluster detail → Scale tab
+- Add: hostname, IP, role gir
+- Remove: node seç, remove bas, confirm et
 
-## Usage
-
-### Creating a Cluster
-
-1. Navigate to **Clusters** → **New Cluster**
-2. Fill in cluster details:
-   - Name, RKE2 version, CNI plugin
-   - Initial master node info
-3. Add SSH credentials
-4. Click **Create Cluster** (generates Ansible artifacts)
-5. Click **Install** to start deployment
-
-### Scaling Clusters
-
-**Add Nodes:**
-1. Go to cluster detail page → **Scale** tab
-2. Enter node hostname, IP, and role (server/agent)
-3. Click **Add Node**
-
-**Remove Nodes:**
-1. Select nodes to remove
-2. Click **Remove Selected**
-3. Confirm deletion (drains and uninstalls RKE2)
-
-### Monitoring
-
-- **Overview Tab:** Cluster status, component health, node list
-- **Jobs Tab:** View installation/scaling job logs
-- **Status Refresh:** Auto-syncs node statuses from Kubernetes
-
-## API Guardrails
-
-The system prevents unsafe operations:
-
-**409 Conflict:**
-```json
-{
-  "detail": "Cluster is busy with operation 'scale_add_workers' (job 42). Please wait for it to complete."
-}
-```
-
-**400 Bad Request:**
-```json
-{
-  "detail": "Initial master must be ACTIVE before adding nodes"
-}
-```
-
-See [CLUSTER_LOCK_AND_GUARDRAILS.md](./CLUSTER_LOCK_AND_GUARDRAILS.md) for details.
-
-## Development
-
-### Project Structure
-```
-.
-├── frontend/          # React frontend
-├── backend/           # FastAPI backend
-│   ├── app/
-│   │   ├── routers/   # API endpoints
-│   │   ├── services/  # Business logic
-│   │   └── models.py  # Database models
-├── ansible/           # Ansible playbooks
-└── data/              # SQLite database (gitignored)
-```
-
-### Running Locally
-```bash
-# Backend
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-
-# Frontend
-cd frontend
-npm install
-npm run dev
-```
+**Monitoring:**
+- Overview: cluster status, component health, node listesi
+- Jobs: installation/scaling job logları
 
 ## Troubleshooting
 
-**Cluster shows PENDING but is actually ACTIVE:**
-- Use **Sync Nodes** button on cluster detail page
-- Auto-sync happens on status refresh
+**409 Conflict:**
+Başka bir operasyon çalışıyor - beklemen gerekiyor. Jobs sayfasında running job'ları kontrol et.
 
-**Node addition fails with 409:**
-- Another operation is running - wait for it to complete
-- Check **Jobs** page for running jobs
+**Node PENDING ama cluster çalışıyor:**
+Sync Nodes butonuna bas veya status refresh yap.
 
-**SSH connection fails:**
-- Verify credentials in **Credentials** page
-- Check node firewalls (port 22)
-- Test SSH manually: `ssh user@node-ip`
+**SSH bağlantı hatası:**
+Credentials sayfasından SSH bilgilerini kontrol et. Firewall'lara bak (port 22).
 
-## License
-
-Internal use only.
-
-## Documentation
+## Daha Fazla
 
 - [Cluster Lock & Guardrails](./CLUSTER_LOCK_AND_GUARDRAILS.md)
-- [RKE2 Config Fix Summary](./RKE2_CONFIG_FIX_SUMMARY.md)
+- [RKE2 Config Fix](./RKE2_CONFIG_FIX_SUMMARY.md)
