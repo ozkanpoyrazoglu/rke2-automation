@@ -1,0 +1,105 @@
+title = "RKE2 Automation Gitleaks Config"
+
+# AWS Credentials
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key ID"
+regex = '''(?i)(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}'''
+tags = ["aws", "credentials"]
+
+[[rules]]
+id = "aws-secret-key"
+description = "AWS Secret Access Key"
+regex = '''(?i)aws(.{0,20})?['\"][0-9a-zA-Z\/+]{40}['\"]'''
+tags = ["aws", "credentials"]
+
+# SSH Private Keys
+[[rules]]
+id = "ssh-private-key"
+description = "SSH Private Key"
+regex = '''-----BEGIN (RSA|DSA|EC|OPENSSH) PRIVATE KEY-----'''
+tags = ["ssh", "private-key"]
+
+# Generic Secrets
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(api[_-]?key|apikey)(.{0,20})?['\"][0-9a-zA-Z]{32,45}['\"]'''
+tags = ["api-key"]
+
+# Passwords in code
+[[rules]]
+id = "password-in-code"
+description = "Password in Code"
+regex = '''(?i)(password|passwd|pwd)(.{0,20})?['\"][^'\"]{8,}['\"]'''
+tags = ["password"]
+
+# Database Connection Strings
+[[rules]]
+id = "database-connection"
+description = "Database Connection String"
+regex = '''(?i)(mysql|postgres|mongodb):\/\/[^\s]+'''
+tags = ["database", "connection-string"]
+
+# Encryption Keys
+[[rules]]
+id = "encryption-key"
+description = "Encryption Key (Base64)"
+regex = '''(?i)(encryption[_-]?key|secret[_-]?key)(.{0,20})?['\"][A-Za-z0-9+/=]{40,}['\"]'''
+tags = ["encryption", "key"]
+
+# JWT Tokens
+[[rules]]
+id = "jwt-token"
+description = "JWT Token"
+regex = '''eyJ[A-Za-z0-9-_=]+\.eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_.+/=]+'''
+tags = ["jwt", "token"]
+
+# Allowlist - Files to ignore
+[allowlist]
+paths = [
+  '''.env.example''',
+  '''.gitleaks.toml''',
+  '''README.md''',
+  '''CLUSTER_LOCK_AND_GUARDRAILS.md''',
+  '''RKE2_CONFIG_FIX_SUMMARY.md''',
+  '''.github/workflows/secrets-scan.yml''',
+  '''frontend/package-lock.json''',
+  '''backend/requirements.txt''',
+  '''RKE2-Cluster/.*''',
+  '''ansible/playbooks/rke2\.yaml/.*''',
+  '''docs/.*''',
+  '''backend/app/models.py''',
+  '''backend/app/services/access_check_service.py''',
+  '''backend/app/services/ansible_generator.py''',
+  '''backend/app/services/ansible_service.py''',
+  '''backend/app/services/variable_renderer.py''',
+  '''frontend/src/pages/Credentials.jsx''',
+]
+
+# Ignore specific patterns - false positives
+regexes = [
+  # Example/placeholder values
+  '''your-access-key-id-here''',
+  '''your-secret-access-key-here''',
+  '''your-generated-encryption-key-here''',
+  '''EXAMPLE[_-]KEY''',
+  '''DUMMY[_-]KEY''',
+  '''placeholder''',
+
+  # Variable/field names (not actual passwords)
+  '''ssh_password''',
+  '''SSH_PASSWORD''',
+  '''registry_password''',
+  '''ansible_password''',
+  '''credential_type.*password''',
+  '''"password"''',
+  '''= "Password"''',
+  '''Enter password''',
+  '''gerekli password''',
+  '''or password''',
+
+  # Documentation/UI text
+  '''BEGIN OPENSSH PRIVATE KEY''',
+  '''Private Key.*Password''',
+]
