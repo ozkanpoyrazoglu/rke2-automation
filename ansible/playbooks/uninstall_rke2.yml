@@ -1,0 +1,47 @@
+---
+# Uninstall RKE2 from all nodes
+- hosts: k8s_cluster
+  gather_facts: false
+  become: yes
+  tasks:
+  - name: Check if RKE2 server uninstall script exists
+    stat:
+      path: /usr/local/bin/rke2-uninstall.sh
+    register: server_uninstall_script
+    when: "'masters' in group_names"
+
+  - name: Check if RKE2 agent uninstall script exists
+    stat:
+      path: /usr/local/bin/rke2-agent-uninstall.sh
+    register: agent_uninstall_script
+    when: "'workers' in group_names"
+
+  - name: Run RKE2 server uninstall script
+    shell: /usr/local/bin/rke2-uninstall.sh
+    when:
+      - "'masters' in group_names"
+      - server_uninstall_script.stat.exists
+    ignore_errors: yes
+
+  - name: Run RKE2 agent uninstall script
+    shell: /usr/local/bin/rke2-agent-uninstall.sh
+    when:
+      - "'workers' in group_names"
+      - agent_uninstall_script.stat.exists
+    ignore_errors: yes
+
+  - name: Remove RKE2 config directory
+    file:
+      path: /etc/rancher/rke2
+      state: absent
+    ignore_errors: yes
+
+  - name: Remove RKE2 data directory
+    file:
+      path: "{{ rke2_data_dir | default('/var/lib/rancher/rke2') }}"
+      state: absent
+    ignore_errors: yes
+
+  - name: Display completion message
+    debug:
+      msg: "RKE2 uninstallation completed on {{ inventory_hostname }}"

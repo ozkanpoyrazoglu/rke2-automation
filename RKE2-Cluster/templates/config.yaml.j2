@@ -1,0 +1,17 @@
+data-dir: {{ rke2_data_dir }}
+{% if rke2_type != "server" %}
+server: https://{{ rke2_api_ip }}:9345
+{% endif %}
+token: {{ rke2_token }}
+{% if rke2_type != "agent" %}
+node-taint:
+  - "CriticalAddonsOnly=true:NoExecute"
+tls-san:
+  - cluster.local
+{% for san in rke2_additional_sans %}
+  - {{ san }}
+{% endfor %}
+kube-apiserver-arg: "kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname"
+{% endif %}
+node-name: {{ inventory_hostname }}
+kubelet-path: {{ rke2_data_dir }}/bin/kubelet

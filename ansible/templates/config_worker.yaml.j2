@@ -1,0 +1,6 @@
+# RKE2 Configuration for Worker Nodes (agents)
+# These nodes join as workers
+
+server: https://{{ rke2_api_ip }}:9345
+token: {{ rke2_token }}
+data-dir: {{ rke2_data_dir | default('/var/lib/rancher/rke2') }}

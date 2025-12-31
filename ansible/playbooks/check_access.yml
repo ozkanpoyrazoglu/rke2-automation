@@ -1,0 +1,79 @@
+---
+# Pre-flight access validation playbook
+# Validates SSH connectivity, sudo permissions, and OS compatibility
+
+- name: Check SSH access and system compatibility
+  hosts: check_hosts
+  gather_facts: yes
+  any_errors_fatal: false
+
+  tasks:
+    - name: Test SSH connectivity
+      ping:
+      register: ssh_test
+      ignore_errors: yes
+
+    - name: Display SSH test result
+      debug:
+        msg: "SSH connectivity: {{ 'OK' if ssh_test is success else 'FAILED' }}"
+
+    - name: Test sudo access
+      become: yes
+      command: whoami
+      register: sudo_test
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display sudo test result
+      debug:
+        msg: "Sudo access: {{ 'OK' if sudo_test.stdout == 'root' else 'FAILED' }}"
+
+    - name: Check OS distribution
+      debug:
+        msg: "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+    - name: Validate OS compatibility (Ubuntu/RHEL/Rocky/CentOS)
+      assert:
+        that:
+          - ansible_distribution in ['Ubuntu', 'Debian', 'RedHat', 'CentOS', 'Rocky']
+        fail_msg: "Unsupported OS: {{ ansible_distribution }}"
+        success_msg: "OS is compatible: {{ ansible_distribution }}"
+      register: os_check
+      ignore_errors: yes
+
+    - name: Display OS check result
+      debug:
+        msg: "OS compatibility: {{ 'OK' if os_check is success else 'FAILED' }}"
+
+    - name: Check available disk space (/)
+      shell: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+      changed_when: false
+
+    - name: Display disk usage
+      debug:
+        msg: "Disk usage: {{ disk_usage.stdout }}%"
+
+    - name: Warn if disk usage is high
+      debug:
+        msg: "WARNING: Disk usage is high ({{ disk_usage.stdout }}%)"
+      when: disk_usage.stdout | int > 80
+
+    - name: Generate summary
+      debug:
+        msg: |
+          === ACCESS CHECK SUMMARY ===
+          Host: {{ inventory_hostname }}
+          SSH: {{ 'OK' if ssh_test is success else 'FAILED' }}
+          Sudo: {{ 'OK' if sudo_test.stdout == 'root' else 'FAILED' }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }} {{ 'OK' if os_check is success else 'FAILED' }}
+          Disk: {{ disk_usage.stdout }}%
+          ============================
+
+    - name: Fail if any critical check failed
+      fail:
+        msg: "Pre-flight checks failed - see summary above"
+      when: >
+        ssh_test is failed or
+        sudo_test.stdout != 'root' or
+        os_check is failed

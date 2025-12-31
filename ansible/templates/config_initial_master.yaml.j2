@@ -1,0 +1,42 @@
+# RKE2 Configuration for Initial Master Node
+# This node bootstraps the cluster - MUST NOT have 'server' parameter
+
+token: {{ rke2_token }}
+
+{% if rke2_additional_sans is defined and rke2_additional_sans %}
+tls-san:
+{% if rke2_additional_sans is string %}
+{% for san in (rke2_additional_sans | from_json) %}
+  - {{ san }}
+{% endfor %}
+{% else %}
+{% for san in rke2_additional_sans %}
+  - {{ san }}
+{% endfor %}
+{% endif %}
+{% endif %}
+
+cni: {{ cni | default('canal') }}
+data-dir: {{ rke2_data_dir | default('/var/lib/rancher/rke2') }}
+
+{% if kube_apiserver_image is defined %}
+kube-apiserver-image: {{ kube_apiserver_image }}
+{% endif %}
+{% if kube_controller_manager_image is defined %}
+kube-controller-manager-image: {{ kube_controller_manager_image }}
+{% endif %}
+{% if kube_proxy_image is defined %}
+kube-proxy-image: {{ kube_proxy_image }}
+{% endif %}
+{% if kube_scheduler_image is defined %}
+kube-scheduler-image: {{ kube_scheduler_image }}
+{% endif %}
+{% if pause_image is defined %}
+pause-image: {{ pause_image }}
+{% endif %}
+{% if runtime_image is defined %}
+runtime-image: {{ runtime_image }}
+{% endif %}
+{% if etcd_image is defined %}
+etcd-image: {{ etcd_image }}
+{% endif %}

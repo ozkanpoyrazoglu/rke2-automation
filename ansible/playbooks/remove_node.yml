@@ -1,0 +1,103 @@
+---
+# Playbook to remove nodes from an existing RKE2 cluster
+# This playbook drains, deletes, and uninstalls RKE2 from nodes
+
+- hosts: localhost
+  gather_facts: false
+  tasks:
+  - name: Drain nodes from cluster
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} drain {{ item }} \
+        --ignore-daemonsets \
+        --delete-emptydir-data \
+        --timeout=120s \
+        --force
+    loop: "{{ nodes_to_remove | from_json }}"
+    ignore_errors: yes
+    register: drain_result
+
+  - name: Delete nodes from cluster
+    shell: kubectl --kubeconfig={{ kubeconfig_path }} delete node {{ item }}
+    loop: "{{ nodes_to_remove | from_json }}"
+    ignore_errors: yes
+    register: delete_result
+
+  - name: Wait for node deletion to propagate
+    pause:
+      seconds: 10
+
+# Uninstall RKE2 from removed server nodes
+- hosts: removed_servers
+  gather_facts: false
+  become: yes
+  tasks:
+  - name: Stop rke2-server.service
+    service:
+      name: rke2-server.service
+      state: stopped
+    ignore_errors: yes
+
+  - name: Disable rke2-server.service
+    service:
+      name: rke2-server.service
+      enabled: no
+    ignore_errors: yes
+
+  - name: Run rke2-uninstall.sh for server
+    shell: |
+      if [ -f /usr/bin/rke2-uninstall.sh ]; then
+        /usr/bin/rke2-uninstall.sh
+      elif [ -f /usr/local/bin/rke2-uninstall.sh ]; then
+        /usr/local/bin/rke2-uninstall.sh
+      else
+        echo "rke2-uninstall.sh not found"
+        exit 1
+      fi
+    ignore_errors: yes
+
+  - name: Clean up rke2 directories
+    file:
+      path: "{{ item }}"
+      state: absent
+    loop:
+      - /etc/rancher/rke2
+      - /var/lib/rancher/rke2
+    ignore_errors: yes
+
+# Uninstall RKE2 from removed agent nodes
+- hosts: removed_agents
+  gather_facts: false
+  become: yes
+  tasks:
+  - name: Stop rke2-agent.service
+    service:
+      name: rke2-agent.service
+      state: stopped
+    ignore_errors: yes
+
+  - name: Disable rke2-agent.service
+    service:
+      name: rke2-agent.service
+      enabled: no
+    ignore_errors: yes
+
+  - name: Run rke2-agent-uninstall.sh
+    shell: |
+      if [ -f /usr/bin/rke2-uninstall.sh ]; then
+        /usr/bin/rke2-uninstall.sh
+      elif [ -f /usr/local/bin/rke2-uninstall.sh ]; then
+        /usr/local/bin/rke2-uninstall.sh
+      else
+        echo "rke2-uninstall.sh not found"
+        exit 1
+      fi
+    ignore_errors: yes
+
+  - name: Clean up rke2 directories
+    file:
+      path: "{{ item }}"
+      state: absent
+    loop:
+      - /etc/rancher/rke2
+      - /var/lib/rancher/rke2
+    ignore_errors: yes

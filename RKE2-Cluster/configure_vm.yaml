@@ -1,0 +1,47 @@
+---
+- hosts: k8s_cluster
+  tasks:
+  #Stop firewall service
+  - name: Stop firewalld
+    service:
+      name: firewalld
+      state: stopped
+  #Disable firewalld service
+  - name: Disable firewalld
+    service:
+      name: firewalld
+      enabled: no         
+  #Stop ufw service
+  - name: Stop ufw
+    service:
+      name: ufw
+      state: stopped
+  #Disable ufw service
+  - name: Disable ufw
+    service:
+      name: ufw
+      enabled: no                       
+  # Install required tools  
+  - name: Install tools
+    yum:
+      name: "{{ item }}"
+      state: latest
+    loop:
+      - wget
+      - net-tools
+      - telnet
+      - realmd
+      - sssd
+      - ntpdate
+      - ntp
+      - oddjob
+      - oddjob-mkhomedir
+      - samba-common-tools
+      - nfs-utils
+      
+  - name: update ulimits
+    ansible.builtin.blockinfile:
+      path: /etc/security/limits.conf
+      block: |
+        * soft nofile 65535
+        * hard nofile 65535   

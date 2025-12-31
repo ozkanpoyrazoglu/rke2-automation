@@ -1,0 +1,64 @@
+# Database files - Contains cluster data, credentials, kubeconfigs
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+
+# Environment files - May contain secrets
+.env
+.env.*
+!.env.example
+
+# Node/Frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Ansible artifacts - Generated cluster configs, kubeconfigs
+ansible/artifacts/
+ansible/clusters/*/
+!ansible/clusters/.gitkeep
+
+# SSH keys - Never commit private keys!
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.pub
+
+# Kubeconfig files - Contain cluster access credentials
+*kubeconfig*
+*.kubeconfig
+kubeconfig
+.kube/
+
+# Credentials
+credentials/
+secrets/
+*.credentials
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker volumes data
+volumes/

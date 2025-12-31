@@ -1,0 +1,63 @@
+---
+# Pre-upgrade checks playbook
+# Runs deterministic checks before RKE2 upgrade
+
+- name: Pre-upgrade readiness checks
+  hosts: rke2_servers
+  become: yes
+  gather_facts: yes
+  tasks:
+    - name: Check etcd health
+      shell: |
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+        exec -n kube-system etcd-{{ inventory_hostname }} -- \
+        etcdctl endpoint health --cluster
+      register: etcd_health
+      failed_when: false
+      run_once: true
+
+    - name: Check etcd member list
+      shell: |
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+        exec -n kube-system etcd-{{ inventory_hostname }} -- \
+        etcdctl member list
+      register: etcd_members
+      run_once: true
+
+    - name: Check disk space
+      shell: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+
+    - name: Verify disk space threshold
+      assert:
+        that:
+          - disk_usage.stdout | int < 80
+        fail_msg: "Disk usage is {{ disk_usage.stdout }}%, exceeds 80% threshold"
+        success_msg: "Disk usage is acceptable: {{ disk_usage.stdout }}%"
+
+    - name: Check certificate expiration
+      shell: |
+        for cert in /var/lib/rancher/rke2/server/tls/*.crt; do
+          openssl x509 -in $cert -noout -enddate
+        done
+      register: cert_expiry
+
+    - name: Get current RKE2 version
+      shell: /usr/local/bin/rke2 --version | head -1 | awk '{print $3}'
+      register: current_version
+
+    - name: Check node status
+      shell: |
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml \
+        get nodes -o json
+      register: node_status
+      run_once: true
+
+    - name: Generate readiness report
+      debug:
+        msg:
+          etcd_healthy: "{{ etcd_health.rc == 0 }}"
+          etcd_details: "{{ etcd_health.stdout }}"
+          disk_usage_percent: "{{ disk_usage.stdout }}"
+          current_version: "{{ current_version.stdout }}"
+          node_count: "{{ (node_status.stdout | from_json).items | length }}"

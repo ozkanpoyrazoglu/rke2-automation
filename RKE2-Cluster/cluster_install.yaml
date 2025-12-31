@@ -1,0 +1,58 @@
+---
+- hosts: k8s_cluster
+  gather_facts: false
+  become: yes
+  tasks:       
+  - name: Create rke2 folder
+    file: 
+      path: /etc/rancher/rke2
+      state: directory
+  - name: Copy config.yaml
+    template: 
+      src: templates/config.yaml.j2 
+      dest: /etc/rancher/rke2/config.yaml
+  - name: Copy registries.yaml
+    template:
+      src: templates/registries.yaml.j2
+      dest: /etc/rancher/rke2/registries.yaml
+
+#setup initial master
+- hosts: masters
+  gather_facts: false
+  become: yes
+  tasks:
+  - name: Install rancher
+    shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION={{ rke2_version }} sh -
+  - name: Enable rke2-server.service
+    service:
+      name: rke2-server.service
+      enabled: yes  
+  - name: Start rke2-server.service
+    service:
+      name: rke2-server.service
+      state: started
+  - name: Wait untill initial master get ready
+    pause:
+      minutes: 5
+  - name: Fetch kubeconfig
+    fetch: 
+      src: /etc/rancher/rke2/rke2.yaml
+      dest: rke2.yaml
+
+#add worker nodes
+- hosts: workers
+  gather_facts: false
+  become: yes
+  tasks:
+  - name: Install rancher
+    shell: curl -sfL https://get.rke2.io | INSTALL_RKE2_VERSION={{ rke2_version }} INSTALL_RKE2_TYPE="agent"  sh -
+  - name: Enable rke2-agent.service
+    service:
+      name: rke2-agent.service
+      enabled: yes  
+  - name: Start rke2-agent.service
+    service:
+      name: rke2-agent.service
+      state: started     
+
+

@@ -1,0 +1,38 @@
+{
+  "cluster_name": "production-cluster",
+  "current_version": "v1.27.10+rke2r1",
+  "target_version": "v1.28.5+rke2r1",
+  "timestamp": "2025-12-25T10:30:00Z",
+  "ready": false,
+  "checks": {
+    "etcd": {
+      "passed": true,
+      "status": "healthy",
+      "details": "3/3 members healthy, quorum intact",
+      "severity": "info"
+    },
+    "nodes": {
+      "passed": false,
+      "total_nodes": 5,
+      "not_ready_nodes": ["worker-3"],
+      "details": "5 nodes, 1 not ready",
+      "severity": "critical"
+    },
+    "disk": {
+      "passed": true,
+      "details": "All nodes below 70% disk usage",
+      "severity": "info"
+    },
+    "certificates": {
+      "passed": true,
+      "details": "All certificates valid for >90 days",
+      "severity": "info"
+    },
+    "deprecated_apis": {
+      "passed": false,
+      "deprecated_apis_found": 3,
+      "details": "Found 3 resources using deprecated APIs:\n- Ingress (networking.k8s.io/v1beta1) -> use networking.k8s.io/v1\n- PodSecurityPolicy (policy/v1beta1) -> removed in 1.25+\n- CronJob (batch/v1beta1) -> use batch/v1",
+      "severity": "critical"
+    }
+  }
+}

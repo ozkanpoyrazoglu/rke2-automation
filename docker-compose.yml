@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  ansible-runner:
+    build: ./ansible-runner
+    volumes:
+      - ./ansible:/ansible
+      - ./data:/data
+      - ansible-tmp:/tmp/ansible
+    networks:
+      - rke2-net
+    command: tail -f /dev/null  # Keep container running
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./ansible:/ansible
+      - ./data:/data
+      - ansible-tmp:/tmp/ansible
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for docker exec
+    environment:
+      - DATABASE_URL=sqlite:////data/rke2.db
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    networks:
+      - rke2-net
+    depends_on:
+      - ansible-runner
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    networks:
+      - rke2-net
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  data:
+  ansible-tmp:
+
+networks:
+  rke2-net:
+    driver: bridge

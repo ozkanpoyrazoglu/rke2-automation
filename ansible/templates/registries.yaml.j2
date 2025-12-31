@@ -1,0 +1,21 @@
+#jinja2: trim_blocks: False
+{% if custom_mirror == 'active' %}
+{% if registry_address is string %}
+{% set reg_addresses = registry_address | from_json %}
+{% else %}
+{% set reg_addresses = registry_address %}
+{% endif %}
+mirrors:
+  {%- for reg_add in reg_addresses %}
+  "{{ reg_add }}":
+    endpoint:
+      - "http://{{ reg_add }}"
+  {%- endfor %}
+configs:
+  {%- for reg_add in reg_addresses %}
+  "{{ reg_add }}":
+    auth:
+      username: {{ registry_user }}
+      password: {{ registry_password }}
+  {%- endfor %}
+{% endif %}
