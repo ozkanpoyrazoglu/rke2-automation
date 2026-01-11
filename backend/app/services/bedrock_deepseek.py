@@ -27,10 +27,24 @@ Structure:
 {
   "verdict": "GO" | "NO-GO" | "CAUTION",
   "reasoning_summary": "Concise summary.",
+  "findings": {
+    "os_layer": ["Finding 1", "Finding 2", ...],
+    "etcd_health": ["Finding 1", ...],
+    "kubernetes_layer": ["Finding 1", ...],
+    "network_layer": ["Finding 1", ...],
+    "workload_safety": ["Finding 1", ...]
+  },
   "blockers": ["Critical issues"],
   "risks": ["Warnings"],
   "action_plan": ["Steps to fix"]
 }
+
+IMPORTANT: The "findings" section must include specific observations for each layer:
+- os_layer: Disk space, memory pressure, system load, swap, time drift, internet connectivity
+- etcd_health: Leader status, DB size, raft lag, defragmentation needs
+- kubernetes_layer: Node readiness, pod crashes, deprecated APIs, PDBs, admission webhooks
+- network_layer: CNI version, ingress controller, network health
+- workload_safety: HostPath volumes, StatefulSets with local PVs
 
 Core Logic:
 - CRITICAL checks -> NO-GO
@@ -73,6 +87,63 @@ Analyze ALL checks in the data and provide actionable, specific recommendations.
             region_name=self.region
         )
 
+    def _optimize_payload(self, preflight_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Optimize preflight data payload for AI by removing non-essential fields.
+        Reduces token usage while preserving critical information for analysis.
+
+        Args:
+            preflight_data: Full preflight report
+
+        Returns:
+            Optimized payload with reduced verbosity
+        """
+        optimized = preflight_data.copy()
+
+        # Remove very long lists of healthy pod names (keep only problematic ones)
+        if "kubernetes" in optimized:
+            k8s = optimized["kubernetes"]
+
+            # Keep only pods with high restart counts (>10)
+            if "kube_system_pod_restarts" in k8s:
+                k8s["kube_system_pod_restarts"] = {
+                    name: count for name, count in k8s["kube_system_pod_restarts"].items()
+                    if count > 10
+                }
+
+            # Limit hostpath_workloads to first 20 (avoid overwhelming)
+            if "hostpath_workloads" in k8s and len(k8s["hostpath_workloads"]) > 20:
+                k8s["hostpath_workloads"] = k8s["hostpath_workloads"][:20]
+
+            # Limit statefulsets to first 20
+            if "statefulsets" in k8s and len(k8s["statefulsets"]) > 20:
+                k8s["statefulsets"] = k8s["statefulsets"][:20]
+
+        # Remove full environment variables from checks (if any)
+        if "checks" in optimized:
+            for check in optimized["checks"]:
+                raw_data = check.get("raw_data", {})
+
+                # Remove env vars if present
+                if "env" in raw_data:
+                    del raw_data["env"]
+
+                # Limit log lines to first 10 lines per error
+                if "errors" in raw_data:
+                    for error in raw_data["errors"]:
+                        if "context_lines" in error and len(error["context_lines"]) > 10:
+                            error["context_lines"] = error["context_lines"][:10]
+
+        # Limit certificates to first 15 (only most critical ones)
+        if "certificates" in optimized and len(optimized["certificates"]) > 15:
+            # Sort by days_until_expiry (most urgent first)
+            optimized["certificates"] = sorted(
+                optimized["certificates"],
+                key=lambda c: c.get("days_until_expiry", 999)
+            )[:15]
+
+        return optimized
+
     def _build_payload(self, preflight_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build Bedrock invoke payload for DeepSeek R1
 
@@ -82,9 +153,12 @@ Analyze ALL checks in the data and provide actionable, specific recommendations.
         Returns:
             Bedrock API payload
         """
+        # Optimize payload to reduce token usage
+        optimized_data = self._optimize_payload(preflight_data)
+
         # Extract target version for enhanced context
-        target_version = preflight_data.get("cluster_metadata", {}).get("target_version")
-        current_version = preflight_data.get("cluster_metadata", {}).get("rke2_version", "unknown")
+        target_version = optimized_data.get("cluster_metadata", {}).get("target_version")
+        current_version = optimized_data.get("cluster_metadata", {}).get("rke2_version", "unknown")
 
         # Build enhanced prompt with target version context
         version_context = ""
@@ -108,7 +182,7 @@ Analyze ALL checks in the data and provide actionable, specific recommendations.
 """
 
         # Format prompt for DeepSeek R1 (Llama-style)
-        json_data = json.dumps(preflight_data, indent=2)
+        json_data = json.dumps(optimized_data, indent=2)
         prompt = f"<|begin_of_sentence|><|User|>{self.SYSTEM_PROMPT}{version_context}\n\nDATA:\n{json_data}<|Assistant|>"
 
         return {

@@ -33,6 +33,7 @@ class NodeInfo(BaseModel):
     firewall_status: str  # disabled|enabled
     ports_reachable: Dict[int, bool]  # {9345: true, 6443: true}
     rke2_service_status: str  # active|inactive|failed
+    internet_connected: bool = False  # Can reach get.rke2.io for artifact downloads
 
 
 class EtcdHealth(BaseModel):
@@ -63,6 +64,8 @@ class KubernetesHealth(BaseModel):
     image_pull_backoff_pods: List[str]
     deprecated_apis: List[Dict[str, str]]  # [{"api": "v1beta1/Ingress", "resource": "my-ingress"}]
     admission_webhooks: List[Dict[str, Any]]  # [{"name": "x", "type": "validating", "failurePolicy": "Fail"}]
+    hostpath_workloads: List[Dict[str, Any]] = []  # Workloads using hostPath volumes (risky for node drains)
+    statefulsets: List[Dict[str, Any]] = []  # StatefulSet inventory with PV type analysis
 
 
 class NetworkHealth(BaseModel):

@@ -1264,7 +1264,7 @@ export default function ClusterDetail() {
                     border: '1px solid #bae6fd'
                   }}>
                     <h5 style={{ margin: 0, marginBottom: '8px', color: '#0369a1' }}>AI Analysis Metrics</h5>
-                    <div style={{ display: 'flex', gap: '20px', fontSize: '14px' }}>
+                    <div style={{ display: 'flex', gap: '20px', fontSize: '14px', flexWrap: 'wrap' }}>
                       {selectedJob.llm_model && (
                         <div>
                           <span style={{ color: '#64748b' }}>Model: </span>
@@ -1273,8 +1273,19 @@ export default function ClusterDetail() {
                       )}
                       {selectedJob.llm_token_count && (
                         <div>
-                          <span style={{ color: '#64748b' }}>Tokens: </span>
+                          <span style={{ color: '#64748b' }}>Tokens Used: </span>
                           <strong>{selectedJob.llm_token_count.toLocaleString()}</strong>
+                        </div>
+                      )}
+                      {selectedJob.llm_token_count && (
+                        <div>
+                          <span style={{ color: '#64748b' }}>Estimated Cost: </span>
+                          <strong style={{ color: '#10b981' }}>
+                            ${(selectedJob.llm_token_count * 0.000003).toFixed(4)}
+                          </strong>
+                          <span style={{ fontSize: '12px', color: '#9ca3af', marginLeft: '4px' }}>
+                            (~$0.003/1K tokens)
+                          </span>
                         </div>
                       )}
                     </div>
@@ -1300,6 +1311,68 @@ export default function ClusterDetail() {
                           </h4>
                           <p style={{ margin: 0, color: '#374151' }}>{analysis.reasoning_summary}</p>
                         </div>
+
+                        {/* Findings Section (Bulgular) */}
+                        {analysis.findings && (
+                          <div style={{ marginTop: '16px', padding: '16px', background: '#f9fafb', borderRadius: '8px' }}>
+                            <h4 style={{ margin: 0, marginBottom: '12px', color: '#1f2937' }}>🔍 Findings (Bulgular)</h4>
+
+                            {analysis.findings.os_layer?.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h5 style={{ color: '#6366f1', marginBottom: '4px' }}>💻 OS Layer</h5>
+                                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                  {analysis.findings.os_layer.map((finding, i) => (
+                                    <li key={i} style={{ color: '#4b5563', marginBottom: '2px' }}>{finding}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {analysis.findings.etcd_health?.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h5 style={{ color: '#8b5cf6', marginBottom: '4px' }}>🗄️ Etcd Health</h5>
+                                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                  {analysis.findings.etcd_health.map((finding, i) => (
+                                    <li key={i} style={{ color: '#4b5563', marginBottom: '2px' }}>{finding}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {analysis.findings.kubernetes_layer?.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h5 style={{ color: '#3b82f6', marginBottom: '4px' }}>☸️ Kubernetes Layer</h5>
+                                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                  {analysis.findings.kubernetes_layer.map((finding, i) => (
+                                    <li key={i} style={{ color: '#4b5563', marginBottom: '2px' }}>{finding}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {analysis.findings.network_layer?.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h5 style={{ color: '#14b8a6', marginBottom: '4px' }}>🌐 Network Layer</h5>
+                                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                  {analysis.findings.network_layer.map((finding, i) => (
+                                    <li key={i} style={{ color: '#4b5563', marginBottom: '2px' }}>{finding}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {analysis.findings.workload_safety?.length > 0 && (
+                              <div style={{ marginBottom: '12px' }}>
+                                <h5 style={{ color: '#f59e0b', marginBottom: '4px' }}>⚙️ Workload Safety</h5>
+                                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                                  {analysis.findings.workload_safety.map((finding, i) => (
+                                    <li key={i} style={{ color: '#4b5563', marginBottom: '2px' }}>{finding}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {analysis.blockers?.length > 0 && (
                           <div style={{ marginTop: '16px' }}>

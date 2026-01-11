@@ -116,13 +116,28 @@ class PreflightCollector:
             return self._run_ssh_command(node_ip, ssh_user, ssh_key=ssh_key,
                                         command=command, ssh_password=ssh_password)
 
-        # OS version
-        stdout, _, _ = run_ssh("lsb_release -d")
-        os_version = stdout.strip().replace("Description:", "").strip() if stdout else "unknown"
+        # OS version with fallback chain
+        # Try 1: lsb_release -d
+        stdout, _, rc = run_ssh("lsb_release -d 2>/dev/null")
+        os_version = stdout.strip().replace("Description:", "").strip() if rc == 0 and stdout else ""
 
-        # Kernel version
-        stdout, _, _ = run_ssh("uname -r")
-        kernel_version = stdout.strip() if stdout else "unknown"
+        # Try 2: cat /etc/os-release (PRETTY_NAME)
+        if not os_version or os_version == "unknown":
+            stdout, _, rc = run_ssh("cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '\"'")
+            os_version = stdout.strip() if rc == 0 and stdout else ""
+
+        # Try 3: uname -a (full system info as last resort)
+        if not os_version or os_version == "unknown":
+            stdout, _, rc = run_ssh("uname -a")
+            os_version = stdout.strip() if rc == 0 and stdout else "Unknown"
+
+        # Fallback to "Unknown" if all methods failed
+        if not os_version:
+            os_version = "Unknown"
+
+        # Kernel version with fallback
+        stdout, _, rc = run_ssh("uname -r")
+        kernel_version = stdout.strip() if rc == 0 and stdout else "unknown"
         
         # Disk usage
         disk_usage = {}
@@ -219,21 +234,38 @@ class PreflightCollector:
             )
             ports_reachable[port] = (rc == 0)
         
-        # RKE2 service status
-        service_name = "rke2-server" if "master" in node_role else "rke2-agent"
+        # RKE2 service status - dynamic service selection based on role
+        # Master nodes run rke2-server, worker nodes run rke2-agent
+        # Handle case-insensitive role matching
+        role_lower = str(node_role).lower()
+        service_name = "rke2-server" if "master" in role_lower else "rke2-agent"
         stdout, _, _ = run_ssh(f"systemctl is-active {service_name}")
         rke2_service_status = stdout.strip() if stdout else "unknown"
-        
+
         if rke2_service_status != "active":
             self._add_check(
                 "rke2_service_status",
                 "rke2",
                 "CRITICAL",
-                f"RKE2 service not active on {node_name}: {rke2_service_status}",
-                {"service": service_name, "status": rke2_service_status},
+                f"RKE2 service ({service_name}) not active on {node_name}: {rke2_service_status}",
+                {"service": service_name, "status": rke2_service_status, "role": node_role},
                 node_name
             )
-        
+
+        # Internet connectivity check - test reachability to RKE2 artifact server
+        stdout, _, rc = run_ssh("curl -sI --connect-timeout 5 https://get.rke2.io 2>&1 | head -1")
+        internet_connected = (rc == 0 and stdout and ("200" in stdout or "301" in stdout or "302" in stdout))
+
+        if not internet_connected:
+            self._add_check(
+                "internet_connectivity",
+                "os",
+                "WARN",
+                f"Node {node_name} cannot reach get.rke2.io (may require airgap installation)",
+                {"url": "https://get.rke2.io", "connected": False},
+                node_name
+            )
+
         return NodeInfo(
             name=node_name,
             role=node_role,
@@ -247,7 +279,8 @@ class PreflightCollector:
             ntp_status=ntp_status,
             firewall_status=firewall_status,
             ports_reachable=ports_reachable,
-            rke2_service_status=rke2_service_status
+            rke2_service_status=rke2_service_status,
+            internet_connected=internet_connected
         )
 
     def collect_disk_details(self, node_name: str, node_ip: str, ssh_user: str,
@@ -828,8 +861,9 @@ class PreflightCollector:
     def collect_log_patterns(self, node_name: str, node_ip: str, ssh_user: str,
                             ssh_key: Optional[str] = None, ssh_password: Optional[str] = None):
         """
-        Scan recent RKE2 service logs for error patterns.
-        Looks for: Error, Critical, CrashLoop, OOMKilled, failed to start
+        Scan recent RKE2 service logs for error patterns with contextual lines.
+        Looks for: Error, Critical, CrashLoop, OOMKilled, failed to start, panic
+        For each match, captures 2 lines before and 2 lines after for AI analysis context.
         """
         try:
             # Determine service name based on node role
@@ -839,27 +873,42 @@ class PreflightCollector:
 
             for service in services:
                 for pattern in error_patterns:
+                    # Use grep with context lines: -B2 (2 before) -A2 (2 after)
+                    # This gives us 5 total lines of context per match
                     stdout, _, rc = self._run_ssh_command(
                         node_ip, ssh_user,
                         ssh_key=ssh_key,
                         ssh_password=ssh_password,
-                        command=f"sudo journalctl -u {service} --since '1 hour ago' | grep -i '{pattern}' | tail -n 3"
+                        command=f"sudo journalctl -u {service} --since '1 hour ago' --no-pager | grep -i -B2 -A2 '{pattern}' | tail -n 15"
                     )
 
                     if rc == 0 and stdout and stdout.strip():
-                        found_errors.append({
-                            "service": service,
-                            "pattern": pattern,
-                            "lines": stdout.strip().split('\n')[:3]  # Limit to 3 lines
-                        })
+                        # Split into groups (grep adds -- between matches)
+                        log_groups = stdout.strip().split('--')
+
+                        # Take only the first match group to avoid overwhelming the AI
+                        if log_groups and log_groups[0].strip():
+                            found_errors.append({
+                                "service": service,
+                                "pattern": pattern,
+                                "context_lines": log_groups[0].strip().split('\n'),  # 5 lines with context
+                                "match_count": len(log_groups)
+                            })
 
             if found_errors:
+                # Deduplicate by service and pattern
+                unique_errors = {}
+                for err in found_errors:
+                    key = f"{err['service']}:{err['pattern']}"
+                    if key not in unique_errors:
+                        unique_errors[key] = err
+
                 self._add_check(
                     "log_patterns",
                     "rke2",
                     "WARN",
-                    f"Found {len(found_errors)} error patterns in RKE2 logs",
-                    {"errors": found_errors},
+                    f"Found {len(unique_errors)} error patterns in RKE2 logs (with context for AI analysis)",
+                    {"errors": list(unique_errors.values())},
                     node_name
                 )
             else:
@@ -885,27 +934,22 @@ class PreflightCollector:
     def collect_network_component_versions(self):
         """
         Collect CNI (Canal/Cilium) and Ingress controller (Traefik/Nginx) versions.
+        Uses both exact name matching and label-based fuzzy matching for better detection.
         """
         try:
-            # Check for Canal (Calico + Flannel) - RKE2's default CNI
-            stdout, _, rc = self._run_kubectl([
-                "get", "daemonset", "-n", "kube-system", "canal",
-                "-o", "jsonpath={.spec.template.spec.containers[0].image}"
-            ])
+            cni_found = False
 
-            if rc == 0 and stdout and stdout != '':
-                self._add_check(
-                    "cni_version",
-                    "network",
-                    "OK",
-                    f"CNI: Canal {stdout}",
-                    {"cni": "canal", "image": stdout},
-                    None
-                )
-            else:
-                # Check for Cilium
+            # Strategy 1: Try exact daemonset names
+            cni_checks = [
+                ("canal", "Canal"),
+                ("cilium", "Cilium"),
+                ("calico-node", "Calico"),
+                ("kube-flannel-ds", "Flannel")
+            ]
+
+            for ds_name, cni_display_name in cni_checks:
                 stdout, _, rc = self._run_kubectl([
-                    "get", "daemonset", "-n", "kube-system", "cilium",
+                    "get", "daemonset", "-n", "kube-system", ds_name,
                     "-o", "jsonpath={.spec.template.spec.containers[0].image}"
                 ])
 
@@ -914,15 +958,30 @@ class PreflightCollector:
                         "cni_version",
                         "network",
                         "OK",
-                        f"CNI: Cilium {stdout}",
-                        {"cni": "cilium", "image": stdout},
+                        f"CNI: {cni_display_name} {stdout}",
+                        {"cni": cni_display_name.lower(), "image": stdout},
                         None
                     )
-                else:
-                    # Check for Calico (standalone)
+                    cni_found = True
+                    break
+
+            # Strategy 2: Label-based fuzzy search if exact name failed
+            if not cni_found:
+                # Search for CNI-related pods by common labels
+                label_searches = [
+                    ("app.kubernetes.io/name=canal", "Canal"),
+                    ("app.kubernetes.io/name=cilium", "Cilium"),
+                    ("app.kubernetes.io/name=calico", "Calico"),
+                    ("k8s-app=canal", "Canal"),
+                    ("k8s-app=cilium", "Cilium"),
+                    ("k8s-app=calico-node", "Calico")
+                ]
+
+                for label, cni_display_name in label_searches:
                     stdout, _, rc = self._run_kubectl([
-                        "get", "daemonset", "-n", "kube-system", "calico-node",
-                        "-o", "jsonpath={.spec.template.spec.containers[0].image}"
+                        "get", "daemonset", "-n", "kube-system",
+                        "-l", label,
+                        "-o", "jsonpath={.items[0].spec.template.spec.containers[0].image}"
                     ])
 
                     if rc == 0 and stdout and stdout != '':
@@ -930,40 +989,36 @@ class PreflightCollector:
                             "cni_version",
                             "network",
                             "OK",
-                            f"CNI: Calico {stdout}",
-                            {"cni": "calico", "image": stdout},
+                            f"CNI: {cni_display_name} {stdout} (detected via labels)",
+                            {"cni": cni_display_name.lower(), "image": stdout, "detection": "label-based"},
                             None
                         )
-                    else:
-                        self._add_check(
-                            "cni_version",
-                            "network",
-                            "WARN",
-                            "CNI plugin not detected (Canal/Cilium/Calico not found)",
-                            None,
-                            None
-                        )
+                        cni_found = True
+                        break
 
-            # Check Ingress controller
-            # Try Traefik (RKE2 default)
-            stdout, _, rc = self._run_kubectl([
-                "get", "deployment", "-n", "kube-system", "traefik",
-                "-o", "jsonpath={.spec.template.spec.containers[0].image}"
-            ])
-
-            if rc == 0 and stdout and stdout != '':
+            if not cni_found:
                 self._add_check(
-                    "ingress_version",
+                    "cni_version",
                     "network",
-                    "OK",
-                    f"Ingress: Traefik {stdout}",
-                    {"ingress": "traefik", "image": stdout},
+                    "WARN",
+                    "CNI plugin not detected (Canal/Cilium/Calico not found)",
+                    None,
                     None
                 )
-            else:
-                # Try Nginx
+
+            # Check Ingress controller with fuzzy matching
+            ingress_found = False
+
+            # Strategy 1: Try exact deployment names
+            ingress_checks = [
+                ("traefik", "kube-system", "Traefik"),
+                ("ingress-nginx-controller", "ingress-nginx", "Nginx"),
+                ("nginx-ingress-controller", "ingress-nginx", "Nginx")
+            ]
+
+            for deploy_name, namespace, ingress_display_name in ingress_checks:
                 stdout, _, rc = self._run_kubectl([
-                    "get", "deployment", "-n", "ingress-nginx", "ingress-nginx-controller",
+                    "get", "deployment", "-n", namespace, deploy_name,
                     "-o", "jsonpath={.spec.template.spec.containers[0].image}"
                 ])
 
@@ -972,19 +1027,49 @@ class PreflightCollector:
                         "ingress_version",
                         "network",
                         "OK",
-                        f"Ingress: Nginx {stdout}",
-                        {"ingress": "nginx", "image": stdout},
+                        f"Ingress: {ingress_display_name} {stdout}",
+                        {"ingress": ingress_display_name.lower(), "image": stdout},
                         None
                     )
-                else:
-                    self._add_check(
-                        "ingress_version",
-                        "network",
-                        "OK",
-                        "No ingress controller detected (optional)",
-                        None,
-                        None
-                    )
+                    ingress_found = True
+                    break
+
+            # Strategy 2: Label-based fuzzy search if exact name failed
+            if not ingress_found:
+                label_searches = [
+                    ("app.kubernetes.io/name=traefik", "kube-system", "Traefik"),
+                    ("app.kubernetes.io/name=ingress-nginx", "ingress-nginx", "Nginx"),
+                    ("app=traefik", "kube-system", "Traefik")
+                ]
+
+                for label, namespace, ingress_display_name in label_searches:
+                    stdout, _, rc = self._run_kubectl([
+                        "get", "deployment", "-n", namespace,
+                        "-l", label,
+                        "-o", "jsonpath={.items[0].spec.template.spec.containers[0].image}"
+                    ])
+
+                    if rc == 0 and stdout and stdout != '':
+                        self._add_check(
+                            "ingress_version",
+                            "network",
+                            "OK",
+                            f"Ingress: {ingress_display_name} {stdout} (detected via labels)",
+                            {"ingress": ingress_display_name.lower(), "image": stdout, "detection": "label-based"},
+                            None
+                        )
+                        ingress_found = True
+                        break
+
+            if not ingress_found:
+                self._add_check(
+                    "ingress_version",
+                    "network",
+                    "OK",
+                    "No ingress controller detected (optional)",
+                    None,
+                    None
+                )
 
         except Exception as e:
             self._add_check(
@@ -995,6 +1080,127 @@ class PreflightCollector:
                 None,
                 None
             )
+
+    def collect_workload_safety(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Collect workload safety information for upgrade readiness:
+        1. HostPath volumes (risky for node drains - data loss risk)
+        2. StatefulSet inventory with PV types (local vs shared storage)
+
+        Returns:
+            Tuple of (hostpath_workloads, statefulsets)
+        """
+        hostpath_workloads = []
+        statefulsets = []
+
+        try:
+            # 1. Scan for HostPath volumes in Deployments and Pods
+            stdout, _, rc = self._run_kubectl(["get", "deployments,daemonsets,pods", "-A", "-o", "json"])
+
+            if rc == 0 and stdout:
+                data = json.loads(stdout)
+
+                for item in data.get("items", []):
+                    kind = item.get("kind")
+                    name = item["metadata"]["name"]
+                    namespace = item["metadata"].get("namespace", "default")
+
+                    # Check pod template spec for hostPath volumes
+                    spec = item.get("spec", {})
+                    template_spec = spec.get("template", {}).get("spec", {}) if kind in ["Deployment", "DaemonSet"] else spec
+
+                    volumes = template_spec.get("volumes", [])
+
+                    for volume in volumes:
+                        if "hostPath" in volume:
+                            hostpath_workloads.append({
+                                "kind": kind,
+                                "name": name,
+                                "namespace": namespace,
+                                "volume_name": volume.get("name"),
+                                "host_path": volume["hostPath"].get("path")
+                            })
+
+            if hostpath_workloads:
+                self._add_check(
+                    "hostpath_volumes",
+                    "kubernetes",
+                    "WARN",
+                    f"Found {len(hostpath_workloads)} workloads using hostPath volumes (data loss risk during node drain)",
+                    {"hostpath_workloads": hostpath_workloads[:10]},  # Limit to first 10 for brevity
+                    None
+                )
+
+            # 2. Scan StatefulSets and analyze PV types
+            stdout, _, rc = self._run_kubectl(["get", "statefulsets", "-A", "-o", "json"])
+
+            if rc == 0 and stdout:
+                sts_data = json.loads(stdout)
+
+                for sts in sts_data.get("items", []):
+                    name = sts["metadata"]["name"]
+                    namespace = sts["metadata"]["namespace"]
+                    replicas = sts["spec"].get("replicas", 0)
+
+                    # Get VolumeClaimTemplates
+                    volume_claim_templates = sts["spec"].get("volumeClaimTemplates", [])
+
+                    pv_types = []
+                    for vct in volume_claim_templates:
+                        storage_class = vct["spec"].get("storageClassName")
+
+                        # Try to determine if it's local or shared storage
+                        if storage_class:
+                            # Get StorageClass to check provisioner
+                            sc_stdout, _, sc_rc = self._run_kubectl(["get", "storageclass", storage_class, "-o", "jsonpath={.provisioner}"])
+
+                            if sc_rc == 0 and sc_stdout:
+                                provisioner = sc_stdout.strip()
+
+                                # Classify as local vs shared
+                                if "local" in provisioner.lower() or "hostpath" in provisioner.lower():
+                                    pv_type = "local"
+                                else:
+                                    pv_type = "shared"
+
+                                pv_types.append({
+                                    "storage_class": storage_class,
+                                    "provisioner": provisioner,
+                                    "type": pv_type
+                                })
+
+                    statefulsets.append({
+                        "name": name,
+                        "namespace": namespace,
+                        "replicas": replicas,
+                        "pv_types": pv_types
+                    })
+
+            if statefulsets:
+                # Check for local PVs (risky for upgrades)
+                local_pv_count = sum(1 for sts in statefulsets for pv in sts["pv_types"] if pv.get("type") == "local")
+
+                if local_pv_count > 0:
+                    self._add_check(
+                        "statefulset_local_pvs",
+                        "kubernetes",
+                        "WARN",
+                        f"Found {local_pv_count} StatefulSet(s) using local PVs (data loss risk during node replacement)",
+                        {"statefulsets_with_local_pvs": [sts for sts in statefulsets if any(pv.get("type") == "local" for pv in sts["pv_types"])]},
+                        None
+                    )
+
+        except Exception as e:
+            self._add_check(
+                "workload_safety",
+                "kubernetes",
+                "WARN",
+                f"Failed to collect workload safety information: {str(e)}",
+                None,
+                None
+            )
+
+        return hostpath_workloads, statefulsets
 
     def collect_kubernetes_health(self) -> KubernetesHealth:
         """Collect Kubernetes layer health"""
@@ -1126,6 +1332,9 @@ class PreflightCollector:
             except:
                 pass
         
+        # Collect workload safety information
+        hostpath_workloads, statefulsets = self.collect_workload_safety()
+
         return KubernetesHealth(
             node_ready_count=node_ready,
             node_not_ready_count=node_not_ready,
@@ -1134,7 +1343,9 @@ class PreflightCollector:
             crash_loop_pods=crash_loop_pods,
             image_pull_backoff_pods=image_pull_backoff_pods,
             deprecated_apis=deprecated_apis,
-            admission_webhooks=admission_webhooks
+            admission_webhooks=admission_webhooks,
+            hostpath_workloads=hostpath_workloads,
+            statefulsets=statefulsets
         )
     
     def collect_network_health(self) -> NetworkHealth:

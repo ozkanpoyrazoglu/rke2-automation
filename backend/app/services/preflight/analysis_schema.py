@@ -4,7 +4,16 @@ Pydantic models for LLM (DeepSeek R1) analysis output
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Literal
+from typing import List, Literal, Optional
+
+
+class FindingsPerLayer(BaseModel):
+    """Categorized findings by infrastructure layer"""
+    os_layer: List[str] = Field(default_factory=list, description="OS-level findings")
+    etcd_health: List[str] = Field(default_factory=list, description="Etcd health findings")
+    kubernetes_layer: List[str] = Field(default_factory=list, description="Kubernetes findings")
+    network_layer: List[str] = Field(default_factory=list, description="Network findings")
+    workload_safety: List[str] = Field(default_factory=list, description="Workload safety findings")
 
 
 class AnalysisResult(BaseModel):
@@ -16,6 +25,11 @@ class AnalysisResult(BaseModel):
 
     reasoning_summary: str = Field(
         description="Concise summary of the analysis reasoning"
+    )
+
+    findings: Optional[FindingsPerLayer] = Field(
+        default=None,
+        description="Categorized findings by infrastructure layer (Bulgular)"
     )
 
     blockers: List[str] = Field(
