@@ -62,3 +62,8 @@ secrets/
 
 # Docker volumes data
 volumes/
+
+
+# AI Agent
+.claude/
+docs/*

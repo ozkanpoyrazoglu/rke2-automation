@@ -1,0 +1,361 @@
+{
+  "cluster_metadata": {
+    "cluster_id": 1,
+    "cluster_name": "prod-cluster-01",
+    "rke2_version": "v1.28.5+rke2r1",
+    "kubernetes_version": "v1.28.5",
+    "node_count": 5,
+    "collected_at": "2025-12-31T12:00:00Z"
+  },
+  "nodes": [
+    {
+      "name": "master-01",
+      "role": "initial_master",
+      "ip": "192.168.1.10",
+      "os_version": "Ubuntu 22.04.3 LTS",
+      "kernel_version": "5.15.0-91-generic",
+      "disk_usage": {
+        "/var/lib/rancher": {
+          "free_pct": 25,
+          "free_gb": 15,
+          "inodes_free_pct": 80
+        },
+        "/var/lib/etcd": {
+          "free_pct": 30,
+          "free_gb": 20,
+          "inodes_free_pct": 85
+        }
+      },
+      "swap_enabled": false,
+      "memory": {
+        "total_mb": 16384,
+        "used_mb": 8192,
+        "free_mb": 8192,
+        "oom_events_1h": 0
+      },
+      "time_drift_ms": 120,
+      "ntp_status": "synced",
+      "firewall_status": "disabled",
+      "ports_reachable": {
+        "9345": true,
+        "6443": true,
+        "2379": true,
+        "2380": true,
+        "10250": true
+      },
+      "rke2_service_status": "active"
+    },
+    {
+      "name": "master-02",
+      "role": "master",
+      "ip": "192.168.1.11",
+      "os_version": "Ubuntu 22.04.3 LTS",
+      "kernel_version": "5.15.0-91-generic",
+      "disk_usage": {
+        "/var/lib/rancher": {
+          "free_pct": 45,
+          "free_gb": 30,
+          "inodes_free_pct": 90
+        }
+      },
+      "swap_enabled": true,
+      "memory": {
+        "total_mb": 16384,
+        "used_mb": 7168,
+        "free_mb": 9216,
+        "oom_events_1h": 0
+      },
+      "time_drift_ms": 800,
+      "ntp_status": "synced",
+      "firewall_status": "disabled",
+      "ports_reachable": {
+        "9345": true,
+        "6443": true,
+        "2379": true,
+        "2380": true,
+        "10250": true
+      },
+      "rke2_service_status": "active"
+    },
+    {
+      "name": "worker-01",
+      "role": "worker",
+      "ip": "192.168.1.20",
+      "os_version": "Ubuntu 22.04.2 LTS",
+      "kernel_version": "5.15.0-89-generic",
+      "disk_usage": {
+        "/var/lib/rancher": {
+          "free_pct": 18,
+          "free_gb": 10,
+          "inodes_free_pct": 75
+        }
+      },
+      "swap_enabled": false,
+      "memory": {
+        "total_mb": 32768,
+        "used_mb": 28672,
+        "free_mb": 4096,
+        "oom_events_1h": 2
+      },
+      "time_drift_ms": 50,
+      "ntp_status": "synced",
+      "firewall_status": "disabled",
+      "ports_reachable": {
+        "10250": true
+      },
+      "rke2_service_status": "active"
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "disk_space_var_lib_rancher",
+      "category": "os",
+      "severity": "WARN",
+      "message": "Disk space below 30% on /var/lib/rancher (25% free)",
+      "raw_data": {
+        "mount": "/var/lib/rancher",
+        "free_pct": 25,
+        "free_gb": 15,
+        "threshold": 30
+      },
+      "node_name": "master-01"
+    },
+    {
+      "check_id": "disk_space_var_lib_rancher",
+      "category": "os",
+      "severity": "CRITICAL",
+      "message": "Disk space critically low on /var/lib/rancher (18% free)",
+      "raw_data": {
+        "mount": "/var/lib/rancher",
+        "free_pct": 18,
+        "free_gb": 10,
+        "threshold": 20
+      },
+      "node_name": "worker-01"
+    },
+    {
+      "check_id": "swap_enabled",
+      "category": "os",
+      "severity": "WARN",
+      "message": "Swap is enabled on node (Kubernetes recommendation: disabled)",
+      "raw_data": {
+        "swap_enabled": true
+      },
+      "node_name": "master-02"
+    },
+    {
+      "check_id": "time_drift",
+      "category": "os",
+      "severity": "WARN",
+      "message": "Time drift exceeds 500ms (800ms detected)",
+      "raw_data": {
+        "drift_ms": 800,
+        "threshold_ms": 500
+      },
+      "node_name": "master-02"
+    },
+    {
+      "check_id": "memory_oom_events",
+      "category": "os",
+      "severity": "WARN",
+      "message": "OOM (Out of Memory) events detected in last hour (2 events)",
+      "raw_data": {
+        "oom_count": 2,
+        "timeframe": "1h"
+      },
+      "node_name": "worker-01"
+    },
+    {
+      "check_id": "etcd_no_leader",
+      "category": "rke2",
+      "severity": "OK",
+      "message": "Etcd cluster has a leader",
+      "raw_data": {
+        "leader_present": true
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "etcd_defrag_needed",
+      "category": "rke2",
+      "severity": "WARN",
+      "message": "Etcd database size exceeds 2GB, defrag recommended (2.3GB)",
+      "raw_data": {
+        "db_size_mb": 2355,
+        "threshold_mb": 2048
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "cert_expiry_30d",
+      "category": "rke2",
+      "severity": "WARN",
+      "message": "Certificate expiring in 25 days: /var/lib/rancher/rke2/server/tls/serving-kube-apiserver.crt",
+      "raw_data": {
+        "path": "/var/lib/rancher/rke2/server/tls/serving-kube-apiserver.crt",
+        "days_until_expiry": 25,
+        "expiry_date": "2026-01-27T10:30:00Z"
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "node_not_ready",
+      "category": "kubernetes",
+      "severity": "OK",
+      "message": "All nodes are Ready (5/5)",
+      "raw_data": {
+        "ready_count": 5,
+        "not_ready_count": 0
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "pod_restarts_high",
+      "category": "kubernetes",
+      "severity": "WARN",
+      "message": "Pod has high restart count: coredns-576bfc4dc7-x9k2l (12 restarts)",
+      "raw_data": {
+        "pod_name": "coredns-576bfc4dc7-x9k2l",
+        "namespace": "kube-system",
+        "restart_count": 12,
+        "threshold": 10
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "pod_crash_loop",
+      "category": "kubernetes",
+      "severity": "CRITICAL",
+      "message": "Pod in CrashLoopBackOff: my-app-7d8f9c5b-4xj2p",
+      "raw_data": {
+        "pod_name": "my-app-7d8f9c5b-4xj2p",
+        "namespace": "default",
+        "status": "CrashLoopBackOff"
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "admission_webhook_fail_policy",
+      "category": "kubernetes",
+      "severity": "WARN",
+      "message": "ValidatingWebhook with failurePolicy=Fail may block upgrades: my-validator",
+      "raw_data": {
+        "webhook_name": "my-validator",
+        "type": "ValidatingWebhookConfiguration",
+        "failure_policy": "Fail"
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "cni_pods_not_running",
+      "category": "network",
+      "severity": "OK",
+      "message": "All CNI pods are running (10/10)",
+      "raw_data": {
+        "cni_type": "canal",
+        "running": 10,
+        "not_running": 0
+      },
+      "node_name": null
+    },
+    {
+      "check_id": "storage_pvc_pending",
+      "category": "storage",
+      "severity": "WARN",
+      "message": "Pending PVCs detected (2 PVCs waiting for provisioning)",
+      "raw_data": {
+        "pending_count": 2,
+        "provisioner": "longhorn"
+      },
+      "node_name": null
+    }
+  ],
+  "etcd": {
+    "endpoint_health": {
+      "https://192.168.1.10:2379": "healthy",
+      "https://192.168.1.11:2379": "healthy",
+      "https://192.168.1.12:2379": "healthy"
+    },
+    "leader_present": true,
+    "db_size_mb": 2355.2,
+    "defrag_recommended": true,
+    "member_count": 3
+  },
+  "certificates": [
+    {
+      "path": "/var/lib/rancher/rke2/server/tls/serving-kube-apiserver.crt",
+      "subject": "CN=kube-apiserver",
+      "expiry_date": "2026-01-27T10:30:00Z",
+      "days_until_expiry": 25,
+      "expired": false
+    },
+    {
+      "path": "/var/lib/rancher/rke2/server/tls/client-ca.crt",
+      "subject": "CN=rke2-client-ca",
+      "expiry_date": "2034-12-15T08:20:00Z",
+      "days_until_expiry": 3280,
+      "expired": false
+    },
+    {
+      "path": "/var/lib/rancher/rke2/server/tls/etcd/server-client.crt",
+      "subject": "CN=etcd-server",
+      "expiry_date": "2026-06-15T14:45:00Z",
+      "days_until_expiry": 165,
+      "expired": false
+    }
+  ],
+  "kubernetes": {
+    "node_ready_count": 5,
+    "node_not_ready_count": 0,
+    "cordoned_nodes": [],
+    "kube_system_pod_restarts": {
+      "coredns-576bfc4dc7-x9k2l": 12,
+      "coredns-576bfc4dc7-p8m4n": 1,
+      "etcd-master-01": 0,
+      "etcd-master-02": 0,
+      "kube-apiserver-master-01": 0,
+      "kube-controller-manager-master-01": 2,
+      "kube-proxy-node1": 0,
+      "kube-scheduler-master-01": 1
+    },
+    "crash_loop_pods": [
+      "default/my-app-7d8f9c5b-4xj2p"
+    ],
+    "image_pull_backoff_pods": [],
+    "deprecated_apis": [
+      {
+        "api": "networking.k8s.io/v1beta1",
+        "kind": "Ingress",
+        "resource": "my-old-ingress",
+        "namespace": "default"
+      }
+    ],
+    "admission_webhooks": [
+      {
+        "name": "my-validator.example.com",
+        "type": "ValidatingWebhookConfiguration",
+        "failurePolicy": "Fail"
+      },
+      {
+        "name": "pod-policy.example.com",
+        "type": "MutatingWebhookConfiguration",
+        "failurePolicy": "Ignore"
+      }
+    ]
+  },
+  "network": {
+    "cni_type": "canal",
+    "cni_pods_running": 10,
+    "cni_pods_not_running": 0,
+    "pod_cidr": "10.42.0.0/16",
+    "pod_cidr_usage_pct": null,
+    "ingress_controller": "nginx",
+    "ingress_version": "v1.9.4"
+  },
+  "storage": {
+    "default_storageclass": "longhorn",
+    "provisioner_type": "longhorn",
+    "provisioner_pods_healthy": true,
+    "pvc_pending_count": 2
+  }
+}

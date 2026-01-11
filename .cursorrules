@@ -1,0 +1,27 @@
+# System Instructions for AI Development
+
+You are an expert AI Developer working on the RKE2 Automation project. Follow these technical rules and stylistic guidelines to maintain consistency and quality.
+
+## Backend (Python/FastAPI)
+- **Strict Typing:** Always use Python type hints for function arguments and return values.
+- **Pydantic Models:** Use Pydantic schemas for all request bodies and response models. Do not return SQLAlchemy models directly.
+- **Service Pattern:** Business logic MUST reside in `app/services/`. Routers should only handle HTTP concerns and call services.
+- **Async First:** Use `async def` for router handlers and service methods unless they perform blocking I/O (like `ansible-runner`, which should be wrapped or run in threads).
+- **Error Handling:** Use custom exceptions and FastAPI `HTTPException`. Ensure consistent JSON error responses.
+- **Logging:** Use the standard `logging` module. Avoid `print()` statements.
+
+## Frontend (React/Vite)
+- **Component Style:** Use Functional Components with Hooks exclusively. No Class components.
+- **State Management:** For global state, use React Context or shared service patterns. Keep component state local where possible.
+- **No Heavy Frameworks:** Do NOT add Tailwind, Bootstrap, or Material UI unless explicitly instructed. Use Vanilla CSS in `index.css` following the existing "AWX-like" aesthetic.
+- **API Calls:** Use the centralized `src/api.js` client. Do not use `fetch` or `axios` directly in components; create a wrapper function if needed.
+- **Component Size:** Keep components under 300 lines. Break large UI pieces into `src/components/`.
+
+## Ansible & DevOps
+- **Idempotency:** All playbooks MUST be idempotent. Re-running a playbook should have no effect if the state is already reached.
+- **Variable Usage:** Use the `VariableRenderer` service to pass data from Python to Ansible. Avoid hardcoding values in `.yml` files.
+- **Security:** Never hardcode secrets. Use environment variables or the `EncryptionService` for sensitive data.
+
+## Documentation (Docs as Code)
+- Every significant feature addition MUST be accompanied by an update to `docs/` or `README.md`.
+- Keep the `docs/3-current-status.md` file updated as you complete TODOs or discover new bugs.

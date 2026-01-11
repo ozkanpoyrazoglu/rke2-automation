@@ -168,6 +168,13 @@ class Job(Base):
     readiness_json = Column(JSON, nullable=True)
     llm_summary = Column(Text, nullable=True)
 
+    # LLM metrics tracking
+    llm_model = Column(String, nullable=True)
+    llm_token_count = Column(Integer, nullable=True)
+
+    # Target RKE2 version for upgrade readiness checks
+    target_version = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)

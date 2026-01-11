@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.database import get_db
 from app.models import Cluster, Job, ClusterType, JobStatus, Node, NodeRole, NodeStatus
 from app.schemas import ClusterCreateNew, ClusterCreateRegistered, ClusterResponse
@@ -504,3 +504,81 @@ async def sync_cluster_nodes(
     invalidate_cache(db, cluster_id)
 
     return result
+
+
+@router.post("/{cluster_id}/preflight-check")
+async def run_preflight_check(
+    cluster_id: int,
+    analyze: bool = False,
+    target_version: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Run upgrade readiness pre-flight check on cluster (async/job-based)
+
+    Creates a background job that collects comprehensive health data:
+    - OS/node metrics (disk, swap, memory, NTP, firewall, ports)
+    - RKE2/etcd health (service status, etcd cluster, certificates)
+    - Kubernetes layer (nodes, pods, webhooks, deprecated APIs)
+    - Network/Storage health (CNI, ingress, StorageClass)
+
+    Query params:
+        analyze: If True, also runs AI analysis on results (requires AWS Bedrock)
+        target_version: Target RKE2 version for upgrade compatibility checks (e.g., "v1.30.2+rke2r1")
+
+    Returns:
+        {"job_id": int, "status": "pending"} - Poll /api/jobs/{job_id} for results
+    """
+    import threading
+    from datetime import datetime
+    from app.services.preflight_background_service import run_preflight_check_background
+
+    # Validate cluster exists
+    cluster = db.query(Cluster).filter(Cluster.id == cluster_id).first()
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    # Validate kubeconfig
+    if not cluster.kubeconfig:
+        raise HTTPException(
+            status_code=400,
+            detail="Kubeconfig not available. Please fetch or upload kubeconfig first."
+        )
+
+    # Validate credential exists
+    if not cluster.credential_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No credential configured for cluster. Please set cluster credential."
+        )
+
+    # Validate nodes exist
+    nodes = db.query(Node).filter(Node.cluster_id == cluster_id).all()
+    if not nodes:
+        raise HTTPException(status_code=400, detail="No nodes found for cluster")
+
+    # Create job record
+    job = Job(
+        cluster_id=cluster_id,
+        job_type="preflight_check",
+        status=JobStatus.PENDING,
+        created_at=datetime.utcnow(),
+        target_version=target_version
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    # Start background thread
+    thread = threading.Thread(
+        target=run_preflight_check_background,
+        args=(job.id, analyze, target_version),
+        daemon=True
+    )
+    thread.start()
+
+    return {
+        "job_id": job.id,
+        "status": "pending",
+        "message": f"Preflight check job #{job.id} started. Poll /api/jobs/{job.id} for results."
+    }

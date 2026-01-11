@@ -18,6 +18,15 @@ export default function ClusterDetail() {
   const [selectedNodes, setSelectedNodes] = useState([])
   const [scaleLoading, setScaleLoading] = useState(false)
 
+  // Upgrade readiness states
+  const [preflightLoading, setPreflightLoading] = useState(false)
+  const [upgradeJobs, setUpgradeJobs] = useState([])
+  const [selectedJob, setSelectedJob] = useState(null)
+  const [jobPolling, setJobPolling] = useState(null)
+  const [aiSelectionModalOpen, setAiSelectionModalOpen] = useState(false)
+  const [useAiAnalysis, setUseAiAnalysis] = useState(true)
+  const [targetVersion, setTargetVersion] = useState('')
+
   // Modal states
   const [alertModal, setAlertModal] = useState({ isOpen: false, title: '', message: '', type: 'info' })
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: null, type: 'warning' })
@@ -33,7 +42,17 @@ export default function ClusterDetail() {
     if (activeTab === 'scale' && cluster?.cluster_type === 'new') {
       loadScaleInfo()
     }
+    if (activeTab === 'upgrade') {
+      loadUpgradeJobs()
+    }
   }, [activeTab, cluster?.kubeconfig, cluster?.cluster_type])
+
+  // Cleanup job polling on unmount
+  useEffect(() => {
+    return () => {
+      if (jobPolling) clearInterval(jobPolling)
+    }
+  }, [jobPolling])
 
   const loadCluster = () => {
     fetch(`http://localhost:8000/api/clusters/${clusterId}`)
@@ -265,6 +284,94 @@ export default function ClusterDetail() {
       })
   }
 
+  // Upgrade readiness functions
+  const loadUpgradeJobs = () => {
+    fetch(`http://localhost:8000/api/jobs?cluster_id=${clusterId}`)
+      .then(res => res.json())
+      .then(data => {
+        const filtered = data.filter(j => ['preflight_check', 'upgrade_check'].includes(j.job_type))
+        filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        setUpgradeJobs(filtered)
+      })
+      .catch(err => console.error('Failed to load upgrade jobs:', err))
+  }
+
+  const loadJobDetail = (jobId) => {
+    fetch(`http://localhost:8000/api/jobs/${jobId}`)
+      .then(res => res.json())
+      .then(data => {
+        setSelectedJob(data)
+        if (data.status === 'running') {
+          startJobPolling(jobId)
+        }
+      })
+      .catch(err => console.error('Failed to load job detail:', err))
+  }
+
+  const startJobPolling = (jobId) => {
+    if (jobPolling) clearInterval(jobPolling)
+    const interval = setInterval(() => {
+      fetch(`http://localhost:8000/api/jobs/${jobId}`)
+        .then(res => res.json())
+        .then(data => {
+          setSelectedJob(data)
+          if (data.status !== 'running') {
+            clearInterval(interval)
+            setJobPolling(null)
+            loadUpgradeJobs()
+          }
+        })
+        .catch(err => console.error('Polling error:', err))
+    }, 2000)
+    setJobPolling(interval)
+  }
+
+  const handleNewPreflightCheck = () => {
+    setAiSelectionModalOpen(true)
+  }
+
+  const handleConfirmPreflightCheck = () => {
+    setAiSelectionModalOpen(false)
+    setPreflightLoading(true)
+
+    // Build URL with query parameters
+    let url = `http://localhost:8000/api/clusters/${clusterId}/preflight-check`
+    const params = []
+    if (useAiAnalysis) params.push('analyze=true')
+    if (targetVersion.trim()) params.push(`target_version=${encodeURIComponent(targetVersion.trim())}`)
+    if (params.length > 0) url += '?' + params.join('&')
+
+    fetch(url, { method: 'POST' })
+      .then(async res => {
+        const data = await res.json()
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to start preflight check')
+        }
+        return data
+      })
+      .then(data => {
+        setAlertModal({
+          isOpen: true,
+          title: 'Check Started',
+          message: `Preflight check job #${data.job_id} started`,
+          type: 'success'
+        })
+        setPreflightLoading(false)
+        setTargetVersion('') // Reset target version after successful submission
+        loadUpgradeJobs()
+        setTimeout(() => loadJobDetail(data.job_id), 500)
+      })
+      .catch(err => {
+        setAlertModal({
+          isOpen: true,
+          title: 'Error',
+          message: err.message,
+          type: 'error'
+        })
+        setPreflightLoading(false)
+      })
+  }
+
   const handleRemoveNodes = () => {
     if (selectedNodes.length === 0) {
       setAlertModal({
@@ -412,6 +519,21 @@ export default function ClusterDetail() {
               Scale Cluster
             </button>
           )}
+          <button
+            onClick={() => setActiveTab('upgrade')}
+            style={{
+              padding: '12px 24px',
+              background: activeTab === 'upgrade' ? '#3b82f6' : 'transparent',
+              color: activeTab === 'upgrade' ? 'white' : '#64748b',
+              border: 'none',
+              borderBottom: activeTab === 'upgrade' ? '2px solid #3b82f6' : 'none',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'upgrade' ? 'bold' : 'normal',
+              borderRadius: '4px 4px 0 0'
+            }}
+          >
+            Upgrade Readiness
+          </button>
         </div>
       </div>
 
@@ -503,9 +625,11 @@ export default function ClusterDetail() {
                   )}
                 </p>
               </div>
-              <button onClick={() => loadStatus(true)} className="btn btn-secondary" disabled={statusLoading}>
-                {statusLoading ? 'Refreshing...' : 'Force Refresh'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => loadStatus(true)} className="btn btn-secondary" disabled={statusLoading}>
+                  {statusLoading ? 'Refreshing...' : 'Force Refresh'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -594,10 +718,9 @@ export default function ClusterDetail() {
                   <div>
                     <p style={{ color: '#64748b', fontSize: '14px', margin: 0 }}>Status</p>
                     <span
-                      className={`badge badge-${
-                        (status.network?.cni?.status || status.cni?.status) === 'healthy' ? 'success' :
-                        (status.network?.cni?.status || status.cni?.status) === 'degraded' ? 'warning' : 'secondary'
-                      }`}
+                      className={`badge badge-${(status.network?.cni?.status || status.cni?.status) === 'healthy' ? 'success' :
+                          (status.network?.cni?.status || status.cni?.status) === 'degraded' ? 'warning' : 'secondary'
+                        }`}
                       style={{ fontSize: '14px', textTransform: 'capitalize' }}
                     >
                       {status.network?.cni?.status || status.cni?.status || 'Unknown'}
@@ -624,10 +747,9 @@ export default function ClusterDetail() {
                         {name.replace('_', ' ')}
                       </span>
                       <span
-                        className={`badge badge-${
-                          health === 'healthy' ? 'success' :
-                          health === 'degraded' ? 'warning' : 'secondary'
-                        }`}
+                        className={`badge badge-${health === 'healthy' ? 'success' :
+                            health === 'degraded' ? 'warning' : 'secondary'
+                          }`}
                         style={{ textTransform: 'capitalize' }}
                       >
                         {health}
@@ -960,83 +1082,329 @@ export default function ClusterDetail() {
 
           {/* Add New Node */}
           {cluster.kubeconfig && (
-          <div className="card">
-            <h3 style={{ marginBottom: '20px' }}>Add New Node</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Hostname</label>
-                <input
-                  type="text"
-                  value={newNodeForm.hostname}
-                  onChange={e => setNewNodeForm({ ...newNodeForm, hostname: e.target.value })}
-                  placeholder="worker-03"
-                />
+            <div className="card">
+              <h3 style={{ marginBottom: '20px' }}>Add New Node</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: '12px', alignItems: 'end' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Hostname</label>
+                  <input
+                    type="text"
+                    value={newNodeForm.hostname}
+                    onChange={e => setNewNodeForm({ ...newNodeForm, hostname: e.target.value })}
+                    placeholder="worker-03"
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Internal IP</label>
+                  <input
+                    type="text"
+                    value={newNodeForm.ip}
+                    onChange={e => setNewNodeForm({ ...newNodeForm, ip: e.target.value })}
+                    placeholder="10.0.0.5"
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>External IP (Optional)</label>
+                  <input
+                    type="text"
+                    value={newNodeForm.external_ip}
+                    onChange={e => setNewNodeForm({ ...newNodeForm, external_ip: e.target.value })}
+                    placeholder="203.0.113.10"
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label>Role</label>
+                  <select
+                    value={newNodeForm.role}
+                    onChange={e => setNewNodeForm({ ...newNodeForm, role: e.target.value })}
+                  >
+                    <option value="agent">Agent (Worker)</option>
+                    <option value="server">Server (Control Plane)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleAddNode}
+                    disabled={scaleLoading || !newNodeForm.hostname || !newNodeForm.ip}
+                  >
+                    {scaleLoading ? 'Adding...' : 'Add Node'}
+                  </button>
+                </div>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Internal IP</label>
-                <input
-                  type="text"
-                  value={newNodeForm.ip}
-                  onChange={e => setNewNodeForm({ ...newNodeForm, ip: e.target.value })}
-                  placeholder="10.0.0.5"
-                />
-              </div>
+              {newNodeForm.external_ip && (
+                <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    id="use-external-ip"
+                    checked={newNodeForm.use_external_ip}
+                    onChange={e => setNewNodeForm({ ...newNodeForm, use_external_ip: e.target.checked })}
+                  />
+                  <label htmlFor="use-external-ip" style={{ margin: 0, fontSize: '14px', cursor: 'pointer' }}>
+                    Use External IP for SSH connection (Ansible will connect to {newNodeForm.use_external_ip ? newNodeForm.external_ip : newNodeForm.ip})
+                  </label>
+                </div>
+              )}
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>External IP (Optional)</label>
-                <input
-                  type="text"
-                  value={newNodeForm.external_ip}
-                  onChange={e => setNewNodeForm({ ...newNodeForm, external_ip: e.target.value })}
-                  placeholder="203.0.113.10"
-                />
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label>Role</label>
-                <select
-                  value={newNodeForm.role}
-                  onChange={e => setNewNodeForm({ ...newNodeForm, role: e.target.value })}
-                >
-                  <option value="agent">Agent (Worker)</option>
-                  <option value="server">Server (Control Plane)</option>
-                </select>
-              </div>
-
-              <div>
-                <button
-                  className="btn btn-primary"
-                  onClick={handleAddNode}
-                  disabled={scaleLoading || !newNodeForm.hostname || !newNodeForm.ip}
-                >
-                  {scaleLoading ? 'Adding...' : 'Add Node'}
-                </button>
+              <div style={{ marginTop: '16px', padding: '12px', background: '#f1f5f9', borderRadius: '4px' }}>
+                <p style={{ margin: 0, fontSize: '14px', color: '#475569' }}>
+                  <strong>Note:</strong> Adding a node will execute the Ansible playbook to install RKE2 and join the node to the cluster.
+                  The node must be accessible via SSH using the cluster's credential.
+                </p>
               </div>
             </div>
+          )}
+        </div>
+      )}
 
-            {newNodeForm.external_ip && (
-              <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="checkbox"
-                  id="use-external-ip"
-                  checked={newNodeForm.use_external_ip}
-                  onChange={e => setNewNodeForm({ ...newNodeForm, use_external_ip: e.target.checked })}
-                />
-                <label htmlFor="use-external-ip" style={{ margin: 0, fontSize: '14px', cursor: 'pointer' }}>
-                  Use External IP for SSH connection (Ansible will connect to {newNodeForm.use_external_ip ? newNodeForm.external_ip : newNodeForm.ip})
-                </label>
+      {/* Upgrade Readiness Tab */}
+      {activeTab === 'upgrade' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '20px' }}>
+          {/* Left Sidebar - Job History */}
+          <div className="card" style={{ maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h4 style={{ margin: 0 }}>Check History</h4>
+              <button
+                onClick={handleNewPreflightCheck}
+                className="btn btn-primary"
+                style={{ fontSize: '13px', padding: '6px 12px' }}
+                disabled={preflightLoading}
+              >
+                New Check
+              </button>
+            </div>
+
+            {/* Job Timeline */}
+            {upgradeJobs.length === 0 ? (
+              <p style={{ color: '#94a3b8', textAlign: 'center', padding: '40px 20px', fontSize: '14px' }}>
+                No checks yet. Click "New Check" to start.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {upgradeJobs.map(job => (
+                  <div
+                    key={job.id}
+                    onClick={() => loadJobDetail(job.id)}
+                    style={{
+                      padding: '12px',
+                      background: selectedJob?.id === job.id ? '#dbeafe' : '#f9fafb',
+                      border: selectedJob?.id === job.id ? '2px solid #3b82f6' : '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <strong style={{ fontSize: '14px' }}>
+                        {job.job_type === 'preflight_check' ? 'Preflight' : 'Upgrade'}
+                      </strong>
+                      <span className={`badge badge-${
+                        job.status === 'success' ? 'success' :
+                        job.status === 'running' ? 'warning' :
+                        job.status === 'failed' ? 'danger' : 'secondary'
+                      }`} style={{ fontSize: '11px' }}>
+                        {job.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      {new Date(job.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            <div style={{ marginTop: '16px', padding: '12px', background: '#f1f5f9', borderRadius: '4px' }}>
-              <p style={{ margin: 0, fontSize: '14px', color: '#475569' }}>
-                <strong>Note:</strong> Adding a node will execute the Ansible playbook to install RKE2 and join the node to the cluster.
-                The node must be accessible via SSH using the cluster's credential.
-              </p>
-            </div>
           </div>
-          )}
+
+          {/* Right Panel - Job Details */}
+          <div>
+            {!selectedJob ? (
+              <div className="card" style={{ textAlign: 'center', padding: '60px 20px', color: '#94a3b8' }}>
+                <p style={{ margin: 0, fontSize: '18px' }}>Select a check from history to view details</p>
+              </div>
+            ) : (
+              <div className="card">
+                {/* Job Header */}
+                <div style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid #e5e7eb' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h3 style={{ margin: 0, marginBottom: '8px' }}>
+                        {selectedJob.job_type === 'preflight_check' ? 'Preflight Check' : 'Upgrade Check'}
+                      </h3>
+                      <p style={{ margin: 0, color: '#64748b', fontSize: '14px' }}>
+                        {new Date(selectedJob.created_at).toLocaleString()}
+                      </p>
+                      {selectedJob.target_version && (
+                        <p style={{ margin: '4px 0 0 0', color: '#3b82f6', fontSize: '14px' }}>
+                          Target: <strong>{selectedJob.target_version}</strong>
+                        </p>
+                      )}
+                    </div>
+                    <span className={`badge badge-${
+                      selectedJob.status === 'success' ? 'success' :
+                      selectedJob.status === 'running' ? 'warning' :
+                      selectedJob.status === 'failed' ? 'danger' : 'secondary'
+                    }`}>
+                      {selectedJob.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* LLM Metrics */}
+                {(selectedJob.llm_model || selectedJob.llm_token_count) && (
+                  <div style={{
+                    marginBottom: '20px',
+                    padding: '12px',
+                    background: '#f0f9ff',
+                    borderRadius: '6px',
+                    border: '1px solid #bae6fd'
+                  }}>
+                    <h5 style={{ margin: 0, marginBottom: '8px', color: '#0369a1' }}>AI Analysis Metrics</h5>
+                    <div style={{ display: 'flex', gap: '20px', fontSize: '14px' }}>
+                      {selectedJob.llm_model && (
+                        <div>
+                          <span style={{ color: '#64748b' }}>Model: </span>
+                          <strong>{selectedJob.llm_model}</strong>
+                        </div>
+                      )}
+                      {selectedJob.llm_token_count && (
+                        <div>
+                          <span style={{ color: '#64748b' }}>Tokens: </span>
+                          <strong>{selectedJob.llm_token_count.toLocaleString()}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Analysis Result */}
+                {selectedJob.llm_summary && (() => {
+                  try {
+                    const analysis = JSON.parse(selectedJob.llm_summary)
+                    return (
+                      <div style={{ marginBottom: '20px' }}>
+                        <div style={{
+                          padding: '16px',
+                          borderRadius: '8px',
+                          background: analysis.verdict === 'GO' ? '#d1fae5' :
+                            analysis.verdict === 'NO-GO' ? '#fee2e2' : '#fef3c7',
+                          border: `2px solid ${analysis.verdict === 'GO' ? '#10b981' :
+                            analysis.verdict === 'NO-GO' ? '#ef4444' : '#f59e0b'}`
+                        }}>
+                          <h4 style={{ margin: 0, marginBottom: '8px', fontSize: '18px' }}>
+                            Verdict: <strong>{analysis.verdict}</strong>
+                          </h4>
+                          <p style={{ margin: 0, color: '#374151' }}>{analysis.reasoning_summary}</p>
+                        </div>
+
+                        {analysis.blockers?.length > 0 && (
+                          <div style={{ marginTop: '16px' }}>
+                            <h5 style={{ color: '#dc2626' }}>🚫 Blockers</h5>
+                            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                              {analysis.blockers.map((b, i) => (
+                                <li key={i} style={{ color: '#991b1b' }}>{b}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {analysis.risks?.length > 0 && (
+                          <div style={{ marginTop: '16px' }}>
+                            <h5 style={{ color: '#d97706' }}>⚠️ Risks</h5>
+                            <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                              {analysis.risks.map((r, i) => (
+                                <li key={i} style={{ color: '#92400e' }}>{r}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {analysis.action_plan?.length > 0 && (
+                          <div style={{ marginTop: '16px' }}>
+                            <h5 style={{ color: '#2563eb' }}>📋 Action Plan</h5>
+                            <ol style={{ margin: 0, paddingLeft: '20px' }}>
+                              {analysis.action_plan.map((step, i) => (
+                                <li key={i} style={{ color: '#1e40af', marginBottom: '4px' }}>{step}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  } catch (e) {
+                    return (
+                      <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '4px', marginBottom: '20px' }}>
+                        <strong>Failed to parse AI analysis</strong>
+                      </div>
+                    )
+                  }
+                })()}
+
+                {/* Raw Check Results */}
+                {selectedJob.readiness_json?.checks && (
+                  <div>
+                    <h4>Check Results ({selectedJob.readiness_json.checks.length})</h4>
+                    {selectedJob.readiness_json.checks.map((check, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          padding: '12px',
+                          marginBottom: '8px',
+                          borderLeft: `4px solid ${check.severity === 'CRITICAL' ? '#ef4444' :
+                            check.severity === 'WARN' ? '#f59e0b' : '#10b981'}`,
+                          background: '#f9fafb',
+                          borderRadius: '4px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <strong>{check.message}</strong>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                            background: check.severity === 'CRITICAL' ? '#fee2e2' :
+                              check.severity === 'WARN' ? '#fef3c7' : '#d1fae5',
+                            color: check.severity === 'CRITICAL' ? '#991b1b' :
+                              check.severity === 'WARN' ? '#92400e' : '#065f46'
+                          }}>
+                            {check.severity}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                          {check.category} • {check.node_name || 'cluster-wide'}
+                        </div>
+                      </div>
+                    ))}
+
+                    {selectedJob.readiness_json.checks.length === 0 && (
+                      <p style={{ color: '#10b981', textAlign: 'center', padding: '20px' }}>
+                        ✅ All checks passed! No issues detected.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Running Status */}
+                {selectedJob.status === 'running' && (
+                  <div style={{ textAlign: 'center', padding: '20px', color: '#f59e0b' }}>
+                    <p>⏳ Check is running... Results will appear here.</p>
+                  </div>
+                )}
+
+                {/* Failed Status */}
+                {selectedJob.status === 'failed' && (
+                  <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '4px', marginTop: '20px' }}>
+                    <strong>Check Failed:</strong>
+                    <pre style={{ marginTop: '8px', fontSize: '12px', whiteSpace: 'pre-wrap' }}>{selectedJob.output}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1121,6 +1489,82 @@ export default function ClusterDetail() {
         type={confirmModal.type}
         confirmText={confirmModal.confirmText}
       />
+
+      {/* AI Selection Modal for New Check */}
+      {aiSelectionModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '8px',
+            padding: '24px',
+            maxWidth: '500px',
+            width: '90%'
+          }}>
+            <h3 style={{ margin: 0, marginBottom: '16px' }}>Start Preflight Check</h3>
+
+            {/* Target Version Input */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', fontSize: '14px' }}>
+                Target RKE2 Version (Optional)
+              </label>
+              <input
+                type="text"
+                value={targetVersion}
+                onChange={(e) => setTargetVersion(e.target.value)}
+                placeholder="e.g., v1.30.2+rke2r1"
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '6px',
+                  fontSize: '14px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                Specify target version for compatibility analysis. Leave empty for general health check.
+              </p>
+            </div>
+
+            {/* AI Analysis Checkbox */}
+            <div style={{ marginBottom: '20px', padding: '16px', background: '#f1f5f9', borderRadius: '6px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '16px' }}>
+                <input
+                  type="checkbox"
+                  checked={useAiAnalysis}
+                  onChange={(e) => setUseAiAnalysis(e.target.checked)}
+                  style={{ width: '18px', height: '18px' }}
+                />
+                <span><strong>Enable AI Analysis</strong> (DeepSeek R1 via AWS Bedrock)</span>
+              </label>
+              <p style={{ margin: '8px 0 0 26px', fontSize: '13px', color: '#64748b' }}>
+                AI provides: verdict (GO/NO-GO/CAUTION), blockers, risks, and action plan. Token costs apply.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setAiSelectionModalOpen(false)} className="btn btn-secondary">
+                Cancel
+              </button>
+              <button onClick={handleConfirmPreflightCheck} className="btn btn-primary" disabled={preflightLoading}>
+                {preflightLoading ? 'Starting...' : 'Start Check'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

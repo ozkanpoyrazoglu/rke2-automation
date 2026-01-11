@@ -133,6 +133,9 @@ class JobResponse(BaseModel):
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     llm_summary: Optional[str]
+    llm_model: Optional[str] = None
+    llm_token_count: Optional[int] = None
+    target_version: Optional[str] = None
 
     class Config:
         from_attributes = True
